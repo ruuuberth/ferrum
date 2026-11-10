@@ -2,7 +2,9 @@ use blitz_traits::navigation::NavigationOptions;
 use blitz_traits::net::{Method, Request, Url};
 use dioxus_native::prelude::{Key, NamedKey};
 
-pub fn req_from_string(url_s: &str) -> Option<Request> {
+use crate::settings::SearchEngine;
+
+pub fn req_from_string(url_s: &str, engine: SearchEngine) -> Option<Request> {
     if let Ok(url) = Url::parse(url_s) {
         return Some(Request::get(url));
     };
@@ -15,12 +17,11 @@ pub fn req_from_string(url_s: &str) -> Option<Request> {
         }
     }
 
-    Some(synthesize_duckduckgo_search_req(url_s))
+    Some(synthesize_search_req(engine, url_s))
 }
 
-fn synthesize_duckduckgo_search_req(query: &str) -> Request {
-    let mut url = Url::parse("https://html.duckduckgo.com/html/").unwrap();
-    url.query_pairs_mut().append_pair("q", query);
+fn synthesize_search_req(engine: SearchEngine, query: &str) -> Request {
+    let url = engine.search_url(query);
 
     NavigationOptions::new(
         url,

@@ -28,6 +28,7 @@ mod fps_overlay;
 mod history;
 mod icons;
 mod nav;
+mod settings;
 mod status_bar;
 mod tab;
 mod tab_strip;
@@ -36,6 +37,7 @@ mod url_suggestions;
 
 use about_pages::AboutPage;
 use browser_history::{BrowsingHistory, HistoryService, HistoryStore, MAX_HISTORY_ENTRIES};
+use settings::{SearchEngine, SettingsStore};
 use status_bar::StatusBar;
 use tab::{Tab, TabId, TabStoreImplExt, TabWebView, active_tab, open_tab, tab_display_title};
 use tab_strip::TabStrip;
@@ -107,6 +109,16 @@ fn app() -> Element {
     let home_url = use_hook(|| AboutPage::NewTab.parsed_url());
     let cli_initial_url = use_hook(|| try_consume_context::<CliInitialUrl>().and_then(|c| c.0));
     let net_provider = use_context::<Arc<StdNetProvider>>();
+
+    // Ajustes persistentes. El efecto guarda cada cambio; también corre una vez
+    // al arrancar, reescribiendo el mismo valor que acabamos de cargar.
+    let settings_store = use_hook(SettingsStore::for_current_app);
+    let search_engine: Signal<SearchEngine> = use_signal(|| settings_store.load());
+    use_context_provider(|| search_engine);
+    {
+        let store = settings_store.clone();
+        use_effect(move || store.save(search_engine()));
+    }
 
     let url_input_handle: Signal<Option<NodeHandle>> = use_signal(|| None);
     let url_input_value = use_signal(|| home_url.to_string());

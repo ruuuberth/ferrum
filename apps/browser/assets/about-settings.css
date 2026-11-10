@@ -1,0 +1,44 @@
+.about-settings {
+    height: 100%;
+    background: #f0f0f0;
+    color: #333;
+    padding: 40px;
+    overflow: auto;
+}
+.about-settings h1 {
+    margin: 0 0 24px;
+    font-size: 28px;
+}
+.about-settings .setting-group {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    padding: 20px;
+    max-width: 640px;
+}
+.about-settings h2 {
+    margin: 0 0 6px;
+    font-size: 18px;
+}
+.about-settings .setting-help {
+    margin: 0 0 16px;
+    color: #666;
+    font-size: 14px;
+}
+.about-settings .setting-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    font-size: 16px;
+}
+.about-settings .setting-option input {
+    width: 18px;
+    height: 18px;
+}
+.about-settings .setting-note {
+    max-width: 640px;
+    margin-top: 16px;
+    color: #888;
+    font-size: 13px;
+}

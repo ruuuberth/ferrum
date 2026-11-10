@@ -7,6 +7,7 @@ use crate::browser_history::{
     BrowsingHistoryStoreExt, HistoryEntry, HistoryService, format_elapsed,
 };
 use crate::nav::{is_enter_key, req_from_string};
+use crate::settings::SearchEngine;
 use crate::tab::Favicon;
 
 // How often the history page refreshes its "Just now / N min ago" labels.
@@ -15,6 +16,7 @@ const HISTORY_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const NEWTAB_CSS: Asset = asset!("../assets/about-newtab.css");
 const STUB_CSS: Asset = asset!("../assets/about-stub.css");
 const HISTORY_CSS: Asset = asset!("../assets/about-history.css");
+const SETTINGS_CSS: Asset = asset!("../assets/about-settings.css");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AboutPage {
@@ -69,7 +71,7 @@ impl AboutPage {
 pub fn AboutPageView(page: AboutPage, on_navigate: Callback<Request>) -> Element {
     match page {
         AboutPage::NewTab => rsx!(NewTabPage { on_navigate }),
-        AboutPage::Settings => rsx!(StubPage { name: "Settings" }),
+        AboutPage::Settings => rsx!(SettingsPage {}),
         AboutPage::History => rsx!(HistoryPage { on_navigate }),
         AboutPage::Bookmarks => rsx!(StubPage { name: "Bookmarks" }),
     }
@@ -78,6 +80,7 @@ pub fn AboutPageView(page: AboutPage, on_navigate: Callback<Request>) -> Element
 #[component]
 fn NewTabPage(on_navigate: Callback<Request>) -> Element {
     let mut query = use_signal(String::new);
+    let search_engine = use_context::<Signal<SearchEngine>>();
     rsx! {
         document::Link { rel: "stylesheet", href: NEWTAB_CSS }
         div { class: "about-newtab",
@@ -96,7 +99,7 @@ fn NewTabPage(on_navigate: Callback<Request>) -> Element {
                             evt.prevent_default();
                             let q = query.read().clone();
                             if !q.is_empty() {
-                                if let Some(req) = req_from_string(&q) {
+                                if let Some(req) = req_from_string(&q, search_engine()) {
                                     on_navigate(req);
                                 }
                             }
@@ -181,6 +184,40 @@ fn HistoryEntryRow(
                 }
                 div { class: "entry-url", "{entry.url}" }
                 div { class: "entry-time", "{elapsed}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn SettingsPage() -> Element {
+    let mut search_engine = use_context::<Signal<SearchEngine>>();
+
+    rsx! {
+        document::Link { rel: "stylesheet", href: SETTINGS_CSS }
+        div { class: "about-settings",
+            h1 { "Settings" }
+            section { class: "setting-group",
+                h2 { "Search engine" }
+                p { class: "setting-help",
+                    "Ferrum uses this engine when you type a search instead of an address."
+                }
+                for engine in SearchEngine::ALL {
+                    label {
+                        class: "setting-option",
+                        onclick: move |_| search_engine.set(engine),
+                        input {
+                            r#type: "radio",
+                            name: "search-engine",
+                            checked: search_engine() == engine,
+                            onchange: move |_| search_engine.set(engine),
+                        }
+                        span { "{engine.label()}" }
+                    }
+                }
+            }
+            p { class: "setting-note",
+                "Google may require JavaScript and render incompletely in Blitz."
             }
         }
     }

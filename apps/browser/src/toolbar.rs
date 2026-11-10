@@ -17,6 +17,7 @@ use crate::about_pages::AboutPage;
 use crate::history::HistoryNav;
 use crate::icons::{self, IconButton};
 use crate::nav::{is_enter_key, open_in_external_browser, req_from_string};
+use crate::settings::SearchEngine;
 use crate::tab::{Tab, TabId, TabStoreExt, TabStoreImplExt, active_tab};
 use crate::url_suggestions::{Suggestion, SuggestionKind, UrlSuggester, UrlSuggestions};
 use crate::{IS_MOBILE, StdNetProvider};
@@ -50,6 +51,7 @@ pub fn Toolbar(
     let net_provider = use_context::<Arc<StdNetProvider>>();
 
     let mut selected_suggestion = use_signal::<Option<usize>>(|| None);
+    let search_engine = use_context::<Signal<SearchEngine>>();
 
     let suggester = use_context::<UrlSuggester>();
     let suggestions = suggester.suggestions();
@@ -92,7 +94,7 @@ pub fn Toolbar(
         let req = match s.kind {
             SuggestionKind::History(entry) => Some(Request::get(entry.url)),
             SuggestionKind::Literal | SuggestionKind::Search => {
-                req_from_string(&url_input_value.read())
+                req_from_string(&url_input_value.read(), search_engine())
             }
         };
         match req {
@@ -132,7 +134,7 @@ pub fn Toolbar(
                 return;
             }
         }
-        match req_from_string(&url_input_value.read()) {
+        match req_from_string(&url_input_value.read(), search_engine()) {
             Some(req) => navigate_from_urlbar(req),
             None => {
                 tracing::warn!("Error parsing URL {}", &*url_input_value.read());
