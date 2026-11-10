@@ -14,10 +14,17 @@
     align-items: center;
     gap: 24px;
 }
-.about-newtab img {
-    max-width: 80%;
-    width: 280px;
-    height: 120px;
+.about-newtab .wordmark {
+    margin: 0;
+    font-size: 72px;
+    font-weight: 700;
+    letter-spacing: -3px;
+    color: #b7410e;
+}
+.about-newtab .tagline {
+    margin: -12px 0 0;
+    font-size: 15px;
+    color: #6b7280;
 }
 .about-newtab .search-input {
     width: 520px;

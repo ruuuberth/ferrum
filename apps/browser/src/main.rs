@@ -215,6 +215,6 @@ fn set_devtools_title(evt: Event<MountedData>) {
     if let Some(handle) = evt.downcast::<NodeHandle>() {
         handle
             .doc_mut()
-            .set_devtools_title(Some("Blitz Browser UI".to_string()));
+            .set_devtools_title(Some("Ferrum Browser UI".to_string()));
     }
 }

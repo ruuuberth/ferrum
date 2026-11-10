@@ -15,7 +15,6 @@ const HISTORY_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const NEWTAB_CSS: Asset = asset!("../assets/about-newtab.css");
 const STUB_CSS: Asset = asset!("../assets/about-stub.css");
 const HISTORY_CSS: Asset = asset!("../assets/about-history.css");
-const BLITZ_LOGO_WTIH_TEXT: Asset = asset!("../assets/blitz-logo-with-text3.svg");
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AboutPage {
@@ -83,7 +82,8 @@ fn NewTabPage(on_navigate: Callback<Request>) -> Element {
         document::Link { rel: "stylesheet", href: NEWTAB_CSS }
         div { class: "about-newtab",
             div { class: "container",
-                img { src: BLITZ_LOGO_WTIH_TEXT, alt: "Blitz" }
+                h1 { class: "wordmark", "Ferrum" }
+                p { class: "tagline", "Un navegador escrito en Rust" }
                 input {
                     class: "search-input",
                     r#type: "text",

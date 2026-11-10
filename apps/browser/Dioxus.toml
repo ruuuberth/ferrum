@@ -1,9 +1,10 @@
 [application]
+name = "Ferrum"
 android_main_activity = "MainActivity.kt"
 
 [bundle]
-publisher = "DioxusLabs"
-identifier = "com.dioxuslabs.blitz"
+publisher = "Ferrum"
+identifier = "dev.ferrum.browser"
 icon = ["./assets/blitz-logo.png", "./assets/blitz-logo.ico"]
 
 [bundle.windows]
