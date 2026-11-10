@@ -362,14 +362,14 @@ fn open_connection(data_dir: Option<PathBuf>) -> Connection {
         return Connection::open_in_memory().expect("sqlite in-memory open must not fail");
     };
 
-    if let Some(parent) = db_path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!(
-                "browser_store: create_dir_all({}) failed: {e}; falling back to in-memory",
-                parent.display()
-            );
-            return Connection::open_in_memory().expect("sqlite in-memory open must not fail");
-        }
+    if let Some(parent) = db_path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        tracing::warn!(
+            "browser_store: create_dir_all({}) failed: {e}; falling back to in-memory",
+            parent.display()
+        );
+        return Connection::open_in_memory().expect("sqlite in-memory open must not fail");
     }
 
     match Connection::open(&db_path) {
