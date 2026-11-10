@@ -263,7 +263,7 @@ struct PrefetchedScriptFetcher {
 
 #[cfg(feature = "javascript")]
 impl blitz_vibey_script::ScriptFetcher for PrefetchedScriptFetcher {
-    fn fetch(&self, url: &Url) -> Result<String, blitz_vibey_script::FetchError> {
+    fn fetch(&self, url: &Url) -> std::result::Result<String, blitz_vibey_script::FetchError> {
         if let Some(source) = self.scripts.get(url) {
             return Ok(source.clone());
         }
