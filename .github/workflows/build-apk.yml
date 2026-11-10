@@ -103,7 +103,7 @@ jobs:
             --android \
             --package-types apk \
             --no-default-features \
-            --features android-defaults
+            --features android-defaults,javascript
 
       - name: Recoger y verificar APK
         run: |
