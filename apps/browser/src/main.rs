@@ -8,9 +8,11 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use blitz_traits::net::Url;
+use browser_persistence::BrowserStore;
 use dioxus_native::{NodeHandle, WindowAttributes, prelude::*, use_back_button};
 
 #[cfg(target_os = "macos")]
@@ -36,8 +38,8 @@ mod toolbar;
 mod url_suggestions;
 
 use about_pages::AboutPage;
-use browser_history::{BrowsingHistory, HistoryService, HistoryStore, MAX_HISTORY_ENTRIES};
-use settings::{SearchEngine, SettingsStore};
+use browser_history::{BrowsingHistory, HistoryService, MAX_HISTORY_ENTRIES};
+use settings::{SearchEngine, load_search_engine, save_search_engine};
 use status_bar::StatusBar;
 use tab::{Tab, TabId, TabStoreImplExt, TabWebView, active_tab, open_tab, tab_display_title};
 use tab_strip::TabStrip;
@@ -105,38 +107,51 @@ fn main() {
     dioxus_native::launch_cfg(app, contexts, vec![Box::new(config)])
 }
 
+/// Carpeta privada de datos de la app.
+///
+/// En Android es el sandbox por aplicación (`/data/user/0/<paquete>/files`).
+/// En escritorio devolvemos `None` para que `BrowserStore` use `ProjectDirs`.
+fn app_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        dioxus_native::current_android_app().internal_data_path()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        None
+    }
+}
+
 fn app() -> Element {
     let home_url = use_hook(|| AboutPage::NewTab.parsed_url());
     let cli_initial_url = use_hook(|| try_consume_context::<CliInitialUrl>().and_then(|c| c.0));
     let net_provider = use_context::<Arc<StdNetProvider>>();
 
+    // Una sola base SQLite en la carpeta privada guarda ajustes e historial.
+    let browser_store: BrowserStore = use_hook(|| BrowserStore::open(app_data_dir()));
+
     // Ajustes persistentes. El efecto guarda cada cambio; también corre una vez
     // al arrancar, reescribiendo el mismo valor que acabamos de cargar.
-    let settings_store = use_hook(SettingsStore::for_current_app);
-    let search_engine: Signal<SearchEngine> = use_signal(|| settings_store.load());
+    let search_engine: Signal<SearchEngine> = use_signal(|| load_search_engine(&browser_store));
     use_context_provider(|| search_engine);
     {
-        let store = settings_store.clone();
-        use_effect(move || store.save(search_engine()));
+        let store = browser_store.clone();
+        use_effect(move || save_search_engine(&store, search_engine()));
     }
 
     let url_input_handle: Signal<Option<NodeHandle>> = use_signal(|| None);
     let url_input_value = use_signal(|| home_url.to_string());
-
-    let history_store: HistoryStore = use_hook(HistoryStore::open);
 
     // Synchronous on purpose: the toolbar's URL suggestions read from this
     // store on first render, so the entries need to be present before the
     // tree mounts. The read is a single sqlite query capped at
     // MAX_HISTORY_ENTRIES rows and runs once per process.
     let browsing_history: Store<BrowsingHistory> = {
-        let history_store = history_store.clone();
-        use_store(move || {
-            BrowsingHistory::from_entries(history_store.load_recent(MAX_HISTORY_ENTRIES))
-        })
+        let store = browser_store.clone();
+        use_store(move || BrowsingHistory::from_entries(store.load_recent(MAX_HISTORY_ENTRIES)))
     };
 
-    let history_service = HistoryService::new(browsing_history, history_store);
+    let history_service = HistoryService::new(browsing_history, browser_store.clone());
     use_context_provider(|| history_service.clone());
     provide_url_suggester(browsing_history);
 

@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use blitz_traits::net::Url;
 use dioxus_native::prelude::*;
 
-pub use browser_persistence::{HistoryEntry, HistoryEntryId, HistoryStore, MAX_HISTORY_ENTRIES};
+pub use browser_persistence::{BrowserStore, HistoryEntry, HistoryEntryId, MAX_HISTORY_ENTRIES};
 
 const SECONDS_PER_MINUTE: u64 = 60;
 const SECONDS_PER_HOUR: u64 = SECONDS_PER_MINUTE * 60;
@@ -102,16 +102,16 @@ pub fn format_elapsed(visited_at: SystemTime, now: SystemTime) -> String {
 }
 
 // Single entry point for visit/favicon writes. Owns the in-memory `Store` and
-// the on-disk `HistoryStore` together so callers don't have to write to both,
+// the on-disk `BrowserStore` together so callers don't have to write to both,
 // and don't have to know that the two sides key favicons differently.
 #[derive(Clone)]
 pub struct HistoryService {
     browsing: Store<BrowsingHistory>,
-    disk: HistoryStore,
+    disk: BrowserStore,
 }
 
 impl HistoryService {
-    pub fn new(browsing: Store<BrowsingHistory>, disk: HistoryStore) -> Self {
+    pub fn new(browsing: Store<BrowsingHistory>, disk: BrowserStore) -> Self {
         Self { browsing, disk }
     }
 

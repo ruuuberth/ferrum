@@ -1,22 +1,31 @@
 //! Persistence layer for the browser app.
 //!
-//! Currently exposes [`HistoryStore`], an on-disk browsing-history store.
+//! Exposes [`BrowserStore`], a SQLite-backed store shared by browsing history
+//! and user settings.
+//!
+//! ## Where the database lives
+//!
+//! [`BrowserStore::open`] accepts the app's private data directory. On Android
+//! the browser passes `AndroidApp::internal_data_path()` — typically
+//! `/data/user/0/dev.ferrum.browser/files` — and the database is stored as
+//! `ferrum.sqlite3` inside it. That directory is sandboxed per app by the OS.
+//!
+//! Passing `None` falls back to `ProjectDirs` on desktop. On mobile there is no
+//! safe default, so `None` opens an in-memory database instead.
 //!
 //! ## Best-effort durability
 //!
 //! Every write path here is best-effort and may silently no-op:
 //!
-//! - On desktop, if `ProjectDirs::from` returns `None` or the data dir is
-//!   unwritable, the sqlite connection is in-memory only — the on-disk view
-//!   is empty across restarts but the in-process store still works.
-//! - On mobile (Android, iOS) the store always opens an in-memory connection;
-//!   history is in-process only and does not persist across launches.
+//! - If the data directory is unwritable or sqlite cannot open the file, the
+//!   connection falls back to in-memory mode — the on-disk view is empty
+//!   across restarts but the in-process store still works.
 //! - Per-statement sqlite errors are logged at `warn` and swallowed; callers
 //!   never see a `Result`.
 //!
-//! This is intentional: history is UX state, not load-bearing on the rest of
-//! the browser, and a transient disk failure must not propagate into a
-//! navigation error. Callers must not rely on a write being durable.
+//! This is intentional: history and settings are UX state, not load-bearing on
+//! the rest of the browser, and a transient disk failure must not propagate
+//! into a navigation error. Callers must not rely on a write being durable.
 //!
 //! ## Threading
 //!
@@ -24,6 +33,7 @@
 //! runtime-agnostic — callers are responsible for keeping disk work off any
 //! latency-sensitive thread (e.g. by wrapping calls in `spawn_blocking`).
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -36,17 +46,25 @@ use url::Url;
 // never edit a previously-released entry, since the index in this list is
 // the version number that gets stamped into `PRAGMA user_version` on disk.
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(
-        "CREATE TABLE history_entries (
-           id          INTEGER PRIMARY KEY AUTOINCREMENT,
-           url         TEXT    NOT NULL,
-           title       TEXT    NOT NULL,
-           favicon_url TEXT,
-           visited_at  INTEGER NOT NULL
-         );
-         CREATE INDEX idx_history_visited_at ON history_entries(visited_at DESC);
-         CREATE INDEX idx_history_url        ON history_entries(url);",
-    )])
+    Migrations::new(vec![
+        M::up(
+            "CREATE TABLE history_entries (
+               id          INTEGER PRIMARY KEY AUTOINCREMENT,
+               url         TEXT    NOT NULL,
+               title       TEXT    NOT NULL,
+               favicon_url TEXT,
+               visited_at  INTEGER NOT NULL
+             );
+             CREATE INDEX idx_history_visited_at ON history_entries(visited_at DESC);
+             CREATE INDEX idx_history_url        ON history_entries(url);",
+        ),
+        M::up(
+            "CREATE TABLE settings (
+               key   TEXT PRIMARY KEY NOT NULL,
+               value TEXT NOT NULL
+             );",
+        ),
+    ])
 }
 
 pub const MAX_HISTORY_ENTRIES: usize = 1000;
@@ -96,15 +114,18 @@ fn next_history_entry_id() -> HistoryEntryId {
 }
 
 #[derive(Clone)]
-pub struct HistoryStore {
+pub struct BrowserStore {
     conn: Arc<Mutex<Connection>>,
 }
 
-impl HistoryStore {
-    pub fn open() -> Self {
-        let mut conn = open_connection();
+impl BrowserStore {
+    /// Abre la base de datos en `data_dir/ferrum.sqlite3`, creando la carpeta
+    /// si hace falta. Si `data_dir` es `None`, escritorio usa `ProjectDirs` y
+    /// móvil cae a una base en memoria.
+    pub fn open(data_dir: Option<PathBuf>) -> Self {
+        let mut conn = open_connection(data_dir);
         if let Err(e) = migrations().to_latest(&mut conn) {
-            tracing::warn!("history_store: schema migration failed: {e}");
+            tracing::warn!("browser_store: schema migration failed: {e}");
         }
         Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -116,6 +137,18 @@ impl HistoryStore {
     // best-effort, never load-bearing on the rest of the browser.
     fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> R) -> Option<R> {
         self.conn.lock().ok().map(|c| f(&c))
+    }
+
+    /// Lee un ajuste de la tabla `settings`. `None` si no existe o si la
+    /// consulta falla.
+    pub fn get_setting(&self, key: &str) -> Option<String> {
+        self.with_conn(|conn| get_setting_inner(conn, key))
+            .flatten()
+    }
+
+    /// Guarda o reemplaza un ajuste. Un fallo solo se registra en el log.
+    pub fn set_setting(&self, key: &str, value: &str) {
+        let _ = self.with_conn(|conn| set_setting_inner(conn, key, value));
     }
 
     pub fn load_recent(&self, limit: usize) -> Vec<HistoryEntry> {
@@ -264,6 +297,33 @@ fn clear_inner(conn: &Connection) {
     }
 }
 
+fn get_setting_inner(conn: &Connection, key: &str) -> Option<String> {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        params![key],
+        |row| row.get(0),
+    ) {
+        Ok(value) => Some(value),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => {
+            tracing::warn!("browser_store: get_setting failed: {e}");
+            None
+        }
+    }
+}
+
+fn set_setting_inner(conn: &Connection, key: &str, value: &str) {
+    // Upsert: `settings.key` is the primary key, so a second write replaces
+    // the value instead of failing with a constraint violation.
+    if let Err(e) = conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    ) {
+        tracing::warn!("browser_store: set_setting failed: {e}");
+    }
+}
+
 fn set_favicon_by_url_inner(conn: &Connection, page_url: &Url, favicon_url: &Url) {
     if let Err(e) = conn.execute(
         "UPDATE history_entries SET favicon_url = ?1
@@ -274,49 +334,71 @@ fn set_favicon_by_url_inner(conn: &Connection, page_url: &Url, favicon_url: &Url
     }
 }
 
-// Mobile (Android, iOS) skips the file path entirely and always lands in
-// in-memory mode. `directories` isn't pulled in for those targets.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn open_file_connection() -> Result<Connection, String> {
-    use directories::ProjectDirs;
-
-    let dirs = ProjectDirs::from("com", "DioxusLabs", "Blitz")
-        .ok_or_else(|| "ProjectDirs::from returned None".to_string())?;
-    let db_path = dirs.data_dir().join("history.sqlite3");
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create_dir_all({}): {e}", parent.display()))?;
+// Resolve the database file. A caller-provided directory always wins so the
+// browser can point at Android's private app sandbox. Without one, desktop
+// keeps using `ProjectDirs`; mobile deliberately stays in memory because it has
+// no safe default directory.
+fn database_path(data_dir: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(dir) = data_dir {
+        return Some(dir.join("ferrum.sqlite3"));
     }
-    Connection::open(&db_path).map_err(|e| format!("open({}): {e}", db_path.display()))
-}
 
-fn open_connection() -> Connection {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        match open_file_connection() {
-            Ok(c) => return c,
-            Err(e) => tracing::warn!(
-                "history_store: file-backed open failed: {e}; falling back to in-memory"
-            ),
+        use directories::ProjectDirs;
+
+        ProjectDirs::from("com", "DioxusLabs", "Blitz")
+            .map(|dirs| dirs.data_dir().join("ferrum.sqlite3"))
+    }
+
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        None
+    }
+}
+
+fn open_connection(data_dir: Option<PathBuf>) -> Connection {
+    let Some(db_path) = database_path(data_dir) else {
+        return Connection::open_in_memory().expect("sqlite in-memory open must not fail");
+    };
+
+    if let Some(parent) = db_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(
+                "browser_store: create_dir_all({}) failed: {e}; falling back to in-memory",
+                parent.display()
+            );
+            return Connection::open_in_memory().expect("sqlite in-memory open must not fail");
         }
     }
-    Connection::open_in_memory().expect("sqlite in-memory open must not fail")
+
+    match Connection::open(&db_path) {
+        Ok(conn) => conn,
+        Err(e) => {
+            tracing::warn!(
+                "browser_store: open({}) failed: {e}; falling back to in-memory",
+                db_path.display()
+            );
+            Connection::open_in_memory().expect("sqlite in-memory open must not fail")
+        }
+    }
 }
 
 // Tests target the inner SQL fns directly so a freshly migrated in-memory
-// connection can be passed in without standing up the full `HistoryStore`
+// connection can be passed in without standing up the full `BrowserStore`
 // wrapper. The behavior we care about — fold semantics, prune cap, NULL-only
 // patching — lives in the inner fns.
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use rusqlite::Connection;
     use url::Url;
 
     use super::{
-        HistoryEntry, MAX_HISTORY_ENTRIES, clear_inner, load_recent_inner, migrations,
-        record_visit_inner, set_favicon_by_url_inner,
+        BrowserStore, HistoryEntry, MAX_HISTORY_ENTRIES, clear_inner, get_setting_inner,
+        load_recent_inner, migrations, record_visit_inner, set_favicon_by_url_inner,
+        set_setting_inner,
     };
 
     fn make_conn() -> Connection {
@@ -503,5 +585,56 @@ mod tests {
             .unwrap()
             .as_secs();
         assert_eq!(top_secs, overflow);
+    }
+
+    #[test]
+    fn setting_round_trips_and_overwrites() {
+        let conn = make_conn();
+        assert_eq!(get_setting_inner(&conn, "search_engine"), None);
+
+        set_setting_inner(&conn, "search_engine", "google");
+        assert_eq!(
+            get_setting_inner(&conn, "search_engine").as_deref(),
+            Some("google")
+        );
+
+        set_setting_inner(&conn, "search_engine", "duckduckgo");
+        assert_eq!(
+            get_setting_inner(&conn, "search_engine").as_deref(),
+            Some("duckduckgo"),
+            "a second write must replace the value, not fail"
+        );
+    }
+
+    #[test]
+    fn settings_and_history_survive_reopening_the_file() {
+        // Regression for the Android bug where every launch opened an
+        // in-memory database and lost both settings and history.
+        let dir = std::env::temp_dir().join(format!(
+            "ferrum-store-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        {
+            let store = BrowserStore::open(Some(dir.clone()));
+            store.set_setting("search_engine", "google");
+            store.record_visit(&entry_at("https://example.com/", 1_000));
+        }
+        {
+            let store = BrowserStore::open(Some(dir.clone()));
+            assert_eq!(
+                store.get_setting("search_engine").as_deref(),
+                Some("google")
+            );
+            let loaded = store.load_recent(10);
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0].url, url("https://example.com/"));
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
