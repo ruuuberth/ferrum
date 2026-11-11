@@ -9,10 +9,27 @@ use blitz_dom::{BaseDocument, NodeId};
 use boa_engine::object::JsObject;
 use boa_engine::{Finalize, JsData, Trace};
 use url::Url;
+use web_time::Instant;
 
 use crate::clock::ScriptClock;
 use crate::fetch::ScriptFetcher;
 use crate::timers::TimerQueue;
+
+/// A cookie stored by `document.cookie`.
+///
+/// Scripts can only see and create non-`HttpOnly` cookies; the fields are kept
+/// so the behaviour matches a browser if an embedder later injects HTTP cookies.
+#[derive(Clone, Debug)]
+pub(crate) struct Cookie {
+    pub name: String,
+    pub value: String,
+    pub domain: String,
+    pub path: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub host_only: bool,
+    pub expires: Option<web_time::SystemTime>,
+}
 
 /// Prototype objects for the DOM wrapper classes
 pub(crate) struct DomProtos {
@@ -98,6 +115,14 @@ pub(crate) struct RuntimeState {
     pub base_url: Option<Url>,
     /// Fetcher backing `fetch()` (shared with `<script src>` and module loading)
     pub fetcher: Option<Rc<RefCell<Box<dyn ScriptFetcher>>>>,
+    /// Cookies created through `document.cookie`
+    pub cookies: Vec<Cookie>,
+    /// `localStorage` entries (per document for now; an embedder could persist them)
+    pub local_storage: HashMap<String, String>,
+    /// `sessionStorage` entries
+    pub session_storage: HashMap<String, String>,
+    /// The monotonic instant exposed as `performance.now() == 0`
+    pub performance_start: Option<Instant>,
 }
 
 /// Maximum number of errors stored in [`RuntimeState::uncaught_errors`] between

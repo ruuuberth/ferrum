@@ -1,7 +1,11 @@
 //! Tests for the JavaScript DOM APIs exposed by blitz-vibey-script
 
+use std::sync::{Arc, Mutex};
+
 use blitz_dom::{Document, DocumentConfig};
 use blitz_traits::events::DomEvent;
+use blitz_traits::navigation::{NavigationOptions, NavigationProvider};
+use blitz_traits::net::{NetHandler, NetProvider, Request, Url};
 use blitz_vibey_script::ScriptDocument;
 use keyboard_types::Modifiers;
 
@@ -991,4 +995,246 @@ fn noscript_content_stays_raw_text_when_scripts_run() {
     );
 
     assert_eq!(text_of_selector(&doc, "p#target"), "real content");
+}
+
+fn doc_from_html_at(html: &str, url: &str) -> ScriptDocument {
+    let mut doc = ScriptDocument::from_html(
+        html,
+        DocumentConfig {
+            base_url: Some(url.to_string()),
+            ..Default::default()
+        },
+    );
+    doc.execute_scripts();
+    doc
+}
+
+#[test]
+fn document_cookie_round_trips_and_respects_path() {
+    let doc = doc_from_html_at(
+        r#"
+        <html><body><div id="out"></div><script>
+            document.cookie = "a=1; path=/";
+            document.cookie = "b=2; path=/search";
+            const before = document.cookie;
+            document.cookie = "a=; max-age=0; path=/";
+            document.getElementById("out").textContent = before + "|" + document.cookie;
+        </script></body></html>
+        "#,
+        "https://example.com/search?q=rust",
+    );
+
+    assert_eq!(text_of_selector(&doc, "#out"), "a=1; b=2|b=2");
+}
+
+#[test]
+fn cookies_from_other_domains_are_rejected() {
+    let doc = doc_from_html_at(
+        r#"
+        <html><body><div id="out"></div><script>
+            document.cookie = "good=1; domain=example.com; path=/";
+            document.cookie = "bad=1; domain=evil.com; path=/";
+            document.getElementById("out").textContent = document.cookie;
+        </script></body></html>
+        "#,
+        "https://www.example.com/",
+    );
+
+    assert_eq!(text_of_selector(&doc, "#out"), "good=1");
+}
+
+#[test]
+fn local_and_session_storage_work() {
+    let doc = doc_from_html(
+        r#"
+        <html><body><div id="out"></div><script>
+            localStorage.setItem("a", 1);
+            localStorage.b = 2;
+            sessionStorage.setItem("c", 3);
+            const first = [
+                localStorage.length,
+                localStorage.getItem("a"),
+                localStorage.b,
+                localStorage.getItem("missing"),
+                sessionStorage.getItem("c"),
+            ].join("|");
+            localStorage.removeItem("a");
+            delete localStorage.b;
+            const second = [
+                localStorage.length,
+                localStorage.getItem("a"),
+                localStorage.b,
+            ].join("|");
+            document.getElementById("out").textContent = first + "||" + second;
+        </script></body></html>
+        "#,
+    );
+
+    assert_eq!(text_of_selector(&doc, "#out"), "2|1|2||3||0||");
+}
+
+#[test]
+fn modern_browser_globals_are_available() {
+    let doc = doc_from_html(
+        r#"
+        <html><body><div id="out"></div><script>
+            const media = matchMedia("(max-width: 99999px)");
+            document.getElementById("out").textContent = [
+                typeof performance.now,
+                performance.now() >= 0,
+                performance.timeOrigin > 0,
+                media.matches,
+                media.media,
+                typeof media.addEventListener,
+                typeof screen.width,
+                screen.colorDepth,
+                document.visibilityState,
+                document.hidden,
+                document.referrer,
+                typeof requestIdleCallback,
+                typeof cancelIdleCallback,
+            ].join("|");
+        </script></body></html>
+        "#,
+    );
+
+    assert_eq!(
+        text_of_selector(&doc, "#out"),
+        "function|true|true|true|(max-width: 99999px)|function|number|24|visible|false||function|function"
+    );
+}
+
+#[test]
+fn navigator_reports_a_real_browser_identity() {
+    let doc = doc_from_html(
+        r#"
+        <html><body><div id="out"></div><script>
+            document.getElementById("out").textContent = [
+                navigator.userAgent.includes("Mozilla/5.0"),
+                navigator.cookieEnabled,
+                navigator.onLine,
+                navigator.webdriver,
+                navigator.language,
+                navigator.languages.join(","),
+                navigator.sendBeacon("/collect", "x"),
+            ].join("|");
+        </script></body></html>
+        "#,
+    );
+
+    assert_eq!(
+        text_of_selector(&doc, "#out"),
+        "true|true|true|false|es-ES|es-ES,es|true"
+    );
+}
+
+#[derive(Default)]
+struct RecordingNavigation {
+    urls: Arc<Mutex<Vec<String>>>,
+}
+
+impl NavigationProvider for RecordingNavigation {
+    fn navigate_to(&self, options: NavigationOptions) {
+        self.urls.lock().unwrap().push(options.url.to_string());
+    }
+}
+
+#[derive(Default)]
+struct RecordingNet {
+    cookies: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl NetProvider for RecordingNet {
+    fn fetch(&self, _: usize, _: Request, _: Box<dyn NetHandler>) {}
+
+    fn set_cookie(&self, url: &Url, cookie: &str) {
+        self.cookies
+            .lock()
+            .unwrap()
+            .push((url.to_string(), cookie.to_string()));
+    }
+}
+
+#[test]
+fn location_replace_assign_and_reload_navigate() {
+    let navigation = RecordingNavigation::default();
+    let urls = Arc::clone(&navigation.urls);
+    let mut doc = ScriptDocument::from_html(
+        r#"
+        <html><body><div id="out"></div><script>
+            location.replace("/next?q=rust");
+            location.assign("https://example.org/other");
+            location.reload();
+            document.getElementById("out").textContent = location.href;
+        </script></body></html>
+        "#,
+        DocumentConfig {
+            base_url: Some("https://example.com/search?q=rust".to_string()),
+            navigation_provider: Some(Arc::new(navigation)),
+            ..Default::default()
+        },
+    );
+    doc.execute_scripts();
+
+    assert_eq!(
+        &*urls.lock().unwrap(),
+        &[
+            "https://example.com/next?q=rust",
+            "https://example.org/other",
+            "https://example.com/search?q=rust",
+        ]
+    );
+    // The navigation API is synchronous; the document keeps running until the
+    // embedder actually swaps it out.
+    assert_eq!(
+        text_of_selector(&doc, "#out"),
+        "https://example.com/search?q=rust"
+    );
+}
+
+#[test]
+fn document_cookies_are_forwarded_to_the_network_provider() {
+    let net = RecordingNet::default();
+    let cookies = Arc::clone(&net.cookies);
+    let mut doc = ScriptDocument::from_html(
+        r#"
+        <html><body><script>
+            document.cookie = "SG_SS=token; expires=Wed, 21 Oct 2026 07:28:00 GMT; path=/";
+            document.cookie = "gone=1; max-age=0; path=/";
+        </script></body></html>
+        "#,
+        DocumentConfig {
+            base_url: Some("https://example.com/search?q=rust".to_string()),
+            net_provider: Some(Arc::new(net)),
+            ..Default::default()
+        },
+    );
+    doc.execute_scripts();
+
+    let recorded = cookies.lock().unwrap();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded[0].0, "https://example.com/search?q=rust");
+    assert_eq!(
+        recorded[0].1,
+        "SG_SS=token; expires=Wed, 21 Oct 2026 07:28:00 GMT; path=/"
+    );
+    assert_eq!(recorded[1].1, "gone=1; max-age=0; path=/");
+}
+
+#[test]
+fn performance_now_advances_with_the_document_clock() {
+    let mut doc = ScriptDocument::from_html(
+        r#"<html><body><div id="out"></div><script>
+            document.getElementById("out").textContent = String(performance.now() >= 0);
+        </script></body></html>"#,
+        DocumentConfig::default(),
+    )
+    .with_virtual_time();
+    doc.execute_scripts();
+    assert_eq!(text_of_selector(&doc, "#out"), "true");
+
+    let start = doc.clock_now();
+    doc.advance_clock_to(start + std::time::Duration::from_millis(250));
+    doc.eval(r#"document.getElementById("out").textContent = String(performance.now() >= 250);"#);
+    assert_eq!(text_of_selector(&doc, "#out"), "true");
 }

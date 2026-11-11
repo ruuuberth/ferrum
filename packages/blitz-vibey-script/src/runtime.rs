@@ -23,6 +23,7 @@ mod css;
 mod events;
 mod fetch;
 mod modules;
+mod storage;
 mod timers;
 mod window;
 
@@ -71,6 +72,7 @@ impl ScriptRuntime {
             let mut state = ctx.state.borrow_mut();
             state.base_url = base_url.cloned();
             state.fetcher = Some(fetcher);
+            state.performance_start = Some(state.clock.now());
         }
         // Share the runtime's clock with boa so that `Date` observes the same
         // (possibly virtual) time as timers

@@ -1,5 +1,9 @@
 //! Abstractions of networking so that custom networking implementations can be provided
 
+/// The User-Agent Blitz sends with network requests and exposes to JavaScript
+/// as `navigator.userAgent`.
+pub const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0";
+
 pub use bytes::Bytes;
 pub use http::{self, HeaderMap, Method};
 use serde::{
@@ -27,6 +31,11 @@ pub trait NetProvider: Send + Sync + 'static {
     fn is_noop(&self) -> bool {
         false
     }
+
+    /// Store a cookie created by JavaScript (`document.cookie`) so that it is
+    /// sent with subsequent HTTP requests. Providers without a cookie jar can
+    /// leave the default implementation, which discards the cookie.
+    fn set_cookie(&self, _url: &Url, _cookie: &str) {}
 }
 
 /// A type that parses raw bytes from a network request into a Data and then calls

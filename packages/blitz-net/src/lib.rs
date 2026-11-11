@@ -2,7 +2,11 @@
 //!
 //! Provides an implementation of the [`blitz_traits::net::NetProvider`] trait.
 
-use blitz_traits::net::{AbortSignal, Body, Bytes, NetHandler, NetProvider, NetWaker, Request};
+#[cfg(feature = "cookies")]
+use blitz_traits::net::Url;
+use blitz_traits::net::{
+    AbortSignal, Body, Bytes, NetHandler, NetProvider, NetWaker, Request, USER_AGENT,
+};
 use data_url::DataUrl;
 use std::{
     collections::HashMap,
@@ -17,8 +21,6 @@ use tokio::sync::Semaphore;
 use http_cache_reqwest::{
     CACacheManager, Cache, CacheMode, CacheOptions, HttpCache, HttpCacheOptions,
 };
-
-const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0";
 
 /// Matches real browsers' per-origin cap of 6.
 const PER_HOST_MAX_CONCURRENT: usize = 6;
@@ -79,6 +81,11 @@ pub struct Provider {
     client: Client,
     waker: Arc<dyn NetWaker>,
     per_host_limits: HostLimits,
+    /// Shared cookie jar. JavaScript writes into it through
+    /// [`NetProvider::set_cookie`], and reqwest reads/writes it for HTTP
+    /// requests, so `document.cookie` and `Set-Cookie` observe the same data.
+    #[cfg(feature = "cookies")]
+    cookie_jar: Arc<reqwest::cookie::Jar>,
     #[cfg(feature = "cache")]
     cache_manager: CACacheManager,
 }
@@ -86,7 +93,9 @@ impl Provider {
     pub fn new(waker: Option<Arc<dyn NetWaker>>) -> Self {
         let builder = reqwest::Client::builder();
         #[cfg(feature = "cookies")]
-        let builder = builder.cookie_store(true);
+        let cookie_jar = Arc::new(reqwest::cookie::Jar::default());
+        #[cfg(feature = "cookies")]
+        let builder = builder.cookie_provider(cookie_jar.clone());
         let client = builder.build().unwrap();
 
         #[cfg(feature = "cache")]
@@ -120,6 +129,8 @@ impl Provider {
             client,
             waker,
             per_host_limits: Arc::new(Mutex::new(HashMap::new())),
+            #[cfg(feature = "cookies")]
+            cookie_jar,
             #[cfg(feature = "cache")]
             cache_manager,
         }
@@ -315,6 +326,11 @@ impl NetProvider for Provider {
             };
             waker.wake(doc_id);
         });
+    }
+
+    #[cfg(feature = "cookies")]
+    fn set_cookie(&self, url: &Url, cookie: &str) {
+        self.cookie_jar.add_cookie_str(cookie, url);
     }
 }
 

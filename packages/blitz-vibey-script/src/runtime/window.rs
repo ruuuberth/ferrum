@@ -1,9 +1,10 @@
 //! Window location, named elements, viewport, scrolling, and embedder messages.
 
 use blitz_dom::NodeId;
+use blitz_traits::navigation::NavigationOptions;
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
-use boa_engine::{Context, JsResult, JsString, JsValue, js_string};
+use boa_engine::{Context, JsResult, JsString, JsValue, NativeFunction, js_string};
 use url::Url;
 
 use super::ScriptRuntime;
@@ -116,8 +117,79 @@ pub(super) fn build_location(base_url: Option<&Url>, context: &mut Context) -> J
             JsString::from(origin),
             Attribute::all(),
         )
+        .function(
+            NativeFunction::from_fn_ptr(location_assign),
+            js_string!("assign"),
+            1,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(location_replace),
+            js_string!("replace"),
+            1,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(location_reload),
+            js_string!("reload"),
+            0,
+        )
         .build()
         .into()
+}
+
+/// `location.assign(url)` / `location.replace(url)`: ask the embedder to
+/// navigate to `url`. `replace` is treated as a normal navigation because
+/// [`NavigationProvider`](blitz_traits::navigation::NavigationProvider) does
+/// not expose history replacement.
+fn navigate_from_arg(args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let Some(value) = args.first() else {
+        return Ok(JsValue::undefined());
+    };
+    if value.is_undefined() || value.is_null() {
+        return Ok(JsValue::undefined());
+    }
+    let target = value.to_string(context)?.to_std_string_lossy();
+    let ctx = dom_ctx(context)?;
+    let url = {
+        let doc = ctx.doc.borrow();
+        doc.base_url().join(&target).ok()
+    };
+    if let Some(url) = url {
+        navigate(&ctx, url);
+    }
+    Ok(JsValue::undefined())
+}
+
+pub(super) fn location_assign(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    navigate_from_arg(args, context)
+}
+
+pub(super) fn location_replace(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    navigate_from_arg(args, context)
+}
+
+pub(super) fn location_reload(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let ctx = dom_ctx(context)?;
+    let url = { ctx.doc.borrow().base_url().clone() };
+    navigate(&ctx, url);
+    Ok(JsValue::undefined())
+}
+
+fn navigate(ctx: &crate::state::DomCtx, url: Url) {
+    let doc = ctx.doc.borrow();
+    doc.navigation_provider
+        .navigate_to(NavigationOptions::new(url, None, doc.id()));
 }
 
 // === Viewport dimensions ===

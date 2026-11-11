@@ -1,11 +1,13 @@
 //! Global registration and the ordered JavaScript bootstrap.
 
+use blitz_traits::net::USER_AGENT;
 use boa_engine::object::ObjectInitializer;
+use boa_engine::object::builtins::JsArray;
 use boa_engine::property::Attribute;
 use boa_engine::{Context, JsResult, JsString, JsValue, NativeFunction, js_string};
 use url::Url;
 
-use super::{css, events, fetch, timers, window};
+use super::{css, events, fetch, storage, timers, window};
 use crate::dom::node_wrapper;
 use crate::state::DomCtx;
 
@@ -18,6 +20,10 @@ pub(super) const BOOTSTRAP_JS: &str = concat!(
     include_str!("bootstrap/url_search_params.js"),
     "\n",
     include_str!("bootstrap/window.js"),
+    "\n",
+    include_str!("bootstrap/storage.js"),
+    "\n",
+    include_str!("bootstrap/compat.js"),
     "\n",
     include_str!("bootstrap/fetch.js"),
     "\n",
@@ -64,14 +70,95 @@ pub(super) fn register_globals(ctx: &DomCtx, base_url: Option<&Url>, context: &m
     register_global(context, "location", location);
 
     // `navigator`
+    let languages = JsArray::from_iter(
+        [
+            JsValue::from(JsString::from("es-ES")),
+            JsValue::from(JsString::from("es")),
+        ],
+        context,
+    );
+    let hardware_concurrency = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(4);
+    let max_touch_points = if cfg!(any(target_os = "android", target_os = "ios")) {
+        5
+    } else {
+        0
+    };
     let navigator = ObjectInitializer::new(context)
         .property(
             js_string!("userAgent"),
-            js_string!("Mozilla/5.0 (compatible; Blitz)"),
+            JsString::from(USER_AGENT),
             Attribute::all(),
+        )
+        .property(
+            js_string!("appName"),
+            js_string!("Netscape"),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("appCodeName"),
+            js_string!("Mozilla"),
+            Attribute::all(),
+        )
+        .property(js_string!("product"), js_string!("Gecko"), Attribute::all())
+        .property(
+            js_string!("language"),
+            js_string!("es-ES"),
+            Attribute::all(),
+        )
+        .property(js_string!("languages"), languages, Attribute::all())
+        .property(
+            js_string!("platform"),
+            JsString::from(navigator_platform()),
+            Attribute::all(),
+        )
+        .property(js_string!("vendor"), js_string!(""), Attribute::all())
+        .property(js_string!("cookieEnabled"), true, Attribute::all())
+        .property(js_string!("onLine"), true, Attribute::all())
+        .property(js_string!("webdriver"), false, Attribute::all())
+        .property(
+            js_string!("hardwareConcurrency"),
+            JsValue::from(hardware_concurrency as f64),
+            Attribute::all(),
+        )
+        .property(
+            js_string!("maxTouchPoints"),
+            JsValue::from(max_touch_points as f64),
+            Attribute::all(),
+        )
+        .function(
+            NativeFunction::from_fn_ptr(storage::send_beacon),
+            js_string!("sendBeacon"),
+            2,
         )
         .build();
     register_global(context, "navigator", navigator.into());
+
+    // Web Storage, `performance`, `matchMedia`, `screen` and
+    // `requestIdleCallback` natives used by the JS bootstrap.
+    register_global_fn(context, "__blitz_storage_get", 2, storage::storage_get);
+    register_global_fn(context, "__blitz_storage_set", 3, storage::storage_set);
+    register_global_fn(
+        context,
+        "__blitz_storage_remove",
+        2,
+        storage::storage_remove,
+    );
+    register_global_fn(context, "__blitz_storage_clear", 1, storage::storage_clear);
+    register_global_fn(context, "__blitz_storage_keys", 1, storage::storage_keys);
+    register_global_fn(
+        context,
+        "__blitz_performance_now",
+        0,
+        storage::performance_now,
+    );
+    register_global_fn(
+        context,
+        "__blitz_performance_time_origin",
+        0,
+        storage::performance_time_origin,
+    );
 
     // Timers and window event listeners
     register_global_fn(context, "setTimeout", 2, timers::set_timeout);
@@ -181,6 +268,20 @@ fn parse_search_params(_: &JsValue, args: &[JsValue], context: &mut Context) -> 
         })
         .collect::<Vec<JsValue>>();
     Ok(JsArray::from_iter(pairs, context).into())
+}
+
+fn navigator_platform() -> &'static str {
+    if cfg!(target_os = "android") {
+        "Linux armv8l"
+    } else if cfg!(target_os = "ios") {
+        "iPhone"
+    } else if cfg!(target_os = "macos") {
+        "MacIntel"
+    } else if cfg!(target_os = "windows") {
+        "Win32"
+    } else {
+        "Linux x86_64"
+    }
 }
 
 fn register_global(context: &mut Context, name: &str, value: JsValue) {

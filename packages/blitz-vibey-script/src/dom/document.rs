@@ -39,6 +39,22 @@ pub(crate) fn init_document_proto(proto: &JsObject, context: &mut Context) {
     define_accessor(proto, "defaultView", Some(default_view), None, context);
     define_accessor(proto, "title", Some(title), None, context);
     define_accessor(proto, "readyState", Some(ready_state), None, context);
+    define_accessor(
+        proto,
+        "visibilityState",
+        Some(visibility_state),
+        None,
+        context,
+    );
+    define_accessor(proto, "hidden", Some(hidden), None, context);
+    define_accessor(proto, "referrer", Some(referrer), None, context);
+    define_accessor(
+        proto,
+        "cookie",
+        Some(super::cookie::get_cookie),
+        Some(super::cookie::set_cookie),
+        context,
+    );
     define_accessor(proto, "styleSheets", Some(style_sheets), None, context);
     define_accessor(
         proto,
@@ -175,6 +191,21 @@ fn ready_state(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult
     let _ = this_node_id(this)?;
     let ready_state = ctx.state.borrow().ready_state;
     Ok(super::js_str(ready_state.as_str()))
+}
+
+fn visibility_state(this: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
+    let _ = this_node_id(this)?;
+    Ok(super::js_str("visible"))
+}
+
+fn hidden(this: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
+    let _ = this_node_id(this)?;
+    Ok(JsValue::from(false))
+}
+
+fn referrer(this: &JsValue, _: &[JsValue], _: &mut Context) -> JsResult<JsValue> {
+    let _ = this_node_id(this)?;
+    Ok(super::js_str(""))
 }
 
 // === Node creation ===
