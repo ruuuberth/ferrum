@@ -12,14 +12,23 @@ jobs:
   probe:
     if: github.ref == 'refs/heads/experimento-js'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Dependencias de Linux
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get update -o Acquire::Retries=5 &&
+               sudo apt-get install -y --fix-missing libfontconfig1-dev pkg-config; then
+              exit 0
+            fi
+            echo "apt intento $attempt falló; reintentando"
+            sleep 15
+          done
+          exit 1
 
       - name: Descargar y decodificar reto
         run: |
