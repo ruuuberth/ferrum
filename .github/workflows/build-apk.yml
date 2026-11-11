@@ -64,7 +64,16 @@ jobs:
           echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang" >> "$GITHUB_ENV"
 
       - name: Dependencias de Linux
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get update -o Acquire::Retries=5 &&
+               sudo apt-get install -y --fix-missing libfontconfig1-dev; then
+              exit 0
+            fi
+            echo "apt intento $attempt falló; reintentando"
+            sleep 15
+          done
+          exit 1
 
       - name: Dioxus CLI
         timeout-minutes: 20
