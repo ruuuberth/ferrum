@@ -83,6 +83,18 @@ impl ScriptRuntime {
             .clock(Rc::new(crate::clock::BoaClockAdapter::new(clock)))
             .build()
             .expect("failed to build JS context");
+        // Boa's default runtime limits are sized for small guest scripts
+        // (10k value-stack slots, 512 JS frames). Production pages blow
+        // through both: Google's "enable JavaScript" stub alone needs more
+        // than 10k stack slots to evaluate its bot-detection expression.
+        // Raising them is cheap (the VM stack lives on the heap, and Boa's
+        // register VM stores JS frames in a Vec rather than on the native
+        // stack), so a renderer should not impose these limits at all.
+        {
+            let limits = context.runtime_limits_mut();
+            limits.set_stack_size_limit(1024 * 1024);
+            limits.set_recursion_limit(4096);
+        }
         context.insert_data(ctx.clone());
 
         Console::register_with_logger(LogCrateLogger, &mut context)

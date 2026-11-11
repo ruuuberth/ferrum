@@ -68,5 +68,7 @@ fn probe_google_stub() {
 
     eprintln!("NAV: {:?}", urls.lock().unwrap());
     eprintln!("COOKIES: {:?}", cookies.lock().unwrap());
-    eprintln!("ERRORS: {:#?}", doc.take_js_errors());
+    let errors = doc.take_js_errors();
+    eprintln!("ERRORS: {:#?}", errors);
+    assert!(errors.is_empty(), "JS errors while running Google stub");
 }
