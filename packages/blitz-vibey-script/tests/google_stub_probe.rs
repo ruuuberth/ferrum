@@ -51,16 +51,20 @@ fn probe_google_stub() {
         },
     )
     .with_virtual_time();
+    eprintln!("[probe] execute_scripts");
     doc.execute_scripts();
+    eprintln!("[probe] execute_scripts done");
 
     for _ in 0..100 {
         let Some(deadline) = doc.next_timer_deadline() else {
+            eprintln!("[probe] no more timers");
             break;
         };
         let now = doc.clock_now();
         doc.advance_clock_to(deadline.max(now));
         doc.poll(None);
     }
+    eprintln!("[probe] timer loop done");
 
     eprintln!("NAV: {:?}", urls.lock().unwrap());
     eprintln!("COOKIES: {:?}", cookies.lock().unwrap());

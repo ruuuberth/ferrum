@@ -12,6 +12,7 @@ jobs:
   probe:
     if: github.ref == 'refs/heads/experimento-js'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -35,4 +36,6 @@ jobs:
       - name: Ejecutar reto en Boa
         env:
           GOOGLE_STUB: ${{ github.workspace }}/stub.html
+          RUST_MIN_STACK: "67108864"
+          BLITZ_JS_TRACE: "1"
         run: cargo test -p blitz-vibey-script --test google_stub_probe -- --nocapture

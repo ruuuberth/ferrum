@@ -152,7 +152,7 @@ impl ScriptDocument {
         }
         self.scripts_executed = true;
 
-        for script in self.collect_scripts() {
+        for (index, script) in self.collect_scripts().into_iter().enumerate() {
             // HTML named element access: elements with ids are exposed as globals
             self.runtime.sync_named_element_globals();
             let (code, url) = match script.src {
@@ -181,6 +181,10 @@ impl ScriptDocument {
                 None => (script.inline_text, None),
             };
 
+            let trace = std::env::var_os("BLITZ_JS_TRACE").is_some();
+            if trace {
+                eprintln!("[js] script {index} start ({} bytes)", code.len());
+            }
             if script.is_module {
                 // Inline modules resolve imports against the document base URL
                 let module_url = url.or_else(|| self.base_url.clone());
@@ -192,6 +196,9 @@ impl ScriptDocument {
                     .unwrap_or("<inline script>")
                     .to_string();
                 self.runtime.eval(&code, &description);
+            }
+            if trace {
+                eprintln!("[js] script {index} done");
             }
         }
 
