@@ -34,5 +34,5 @@ jobs:
 
       - name: Ejecutar reto en Boa
         env:
-          GOOGLE_STUB: stub.html
+          GOOGLE_STUB: ${{ github.workspace }}/stub.html
         run: cargo test -p blitz-vibey-script --test google_stub_probe -- --nocapture
