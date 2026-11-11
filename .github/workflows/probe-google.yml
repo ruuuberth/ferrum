@@ -22,7 +22,8 @@ jobs:
 
       - name: Descargar y decodificar reto
         run: |
-          curl -sSfL -o stub.html.gz.b64 https://raw.githubusercontent.com/ruuuberth/ferrum/probe-stub/stub.html.gz.b64
+          git fetch --depth=1 origin probe-stub
+          git show FETCH_HEAD:stub.html.gz.b64 > stub.html.gz.b64
           python3 - <<'PY'
           import base64, gzip
           data = base64.b64decode(open("stub.html.gz.b64", "rb").read())
