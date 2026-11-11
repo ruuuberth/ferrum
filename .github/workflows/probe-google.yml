@@ -36,7 +36,9 @@ jobs:
           fi
           echo "usando espejo: $mirror"
           echo "deb $mirror noble main universe restricted multiverse" | sudo tee /etc/apt/sources.list
-          sudo rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list
+          echo "deb $mirror noble-updates main universe restricted multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb $mirror noble-security main universe restricted multiverse" | sudo tee -a /etc/apt/sources.list
+          sudo rm -f /etc/apt/sources.list.d/ubuntu.sources
           sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30
           for attempt in 1 2 3 4 5; do
             if sudo apt-get install -y --fix-missing libfontconfig1-dev pkg-config; then
