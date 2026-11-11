@@ -1128,6 +1128,26 @@ fn navigator_reports_a_real_browser_identity() {
     );
 }
 
+#[test]
+fn atob_and_btoa_encode_binary_strings() {
+    let doc = doc_from_html(
+        r#"
+        <html><body>
+            <div id="out"></div>
+            <script>
+                document.getElementById("out").textContent =
+                    atob("aGVsbG8=") + " " + btoa("hello") + " " +
+                    btoa(String.fromCharCode(0, 255)) + " " +
+                    atob("AAH/");
+            </script>
+        </body></html>
+        "#,
+    );
+    let text = text_of_selector(&doc, "#out");
+    // The last decode maps bytes back to Latin-1 code points 0x00, 0x01, 0xFF.
+    assert_eq!(text, "hello aGVsbG8= AP8= \u{0}\u{1}\u{ff}");
+}
+
 #[derive(Default)]
 struct RecordingNavigation {
     urls: Arc<Mutex<Vec<String>>>,

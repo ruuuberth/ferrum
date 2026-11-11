@@ -7,7 +7,7 @@ use boa_engine::property::Attribute;
 use boa_engine::{Context, JsResult, JsString, JsValue, NativeFunction, js_string};
 use url::Url;
 
-use super::{css, events, fetch, storage, timers, window};
+use super::{css, encoding, events, fetch, storage, timers, window};
 use crate::dom::node_wrapper;
 use crate::state::DomCtx;
 
@@ -50,6 +50,10 @@ pub(super) fn register_globals(ctx: &DomCtx, base_url: Option<&Url>, context: &m
         1,
         parse_search_params,
     );
+    // HTML base64 helpers. Boa does not provide them and real pages (including
+    // Google's botguard challenge) call `atob`/`btoa` directly.
+    register_global_fn(context, "atob", 1, encoding::atob);
+    register_global_fn(context, "btoa", 1, encoding::btoa);
     // `document`
     let root_id = ctx.doc.borrow().root_node().id;
     let document_wrapper = node_wrapper(ctx, root_id, context);

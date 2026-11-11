@@ -20,6 +20,7 @@ use modules::BlitzModuleLoader;
 
 mod bootstrap;
 mod css;
+mod encoding;
 mod events;
 mod fetch;
 mod modules;
