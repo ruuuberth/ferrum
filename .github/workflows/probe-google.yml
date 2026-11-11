@@ -3,21 +3,14 @@ name: Probe Google challenge
 # Temporary diagnostic workflow: runs a saved Google "enable JavaScript"
 # challenge through the Boa runtime on x86_64 (where Boa's nan-boxed value
 # representation is supported) and prints navigation URLs, forwarded cookies
-# and JS errors.
+# and JS errors. The challenge lives on the throwaway `probe-stub` branch.
 on:
-  workflow_dispatch:
-    inputs:
-      stub_gz_b64_a:
-        description: First half of the gzip+base64 challenge HTML
-        required: true
-        type: string
-      stub_gz_b64_b:
-        description: Second half of the gzip+base64 challenge HTML
-        required: true
-        type: string
+  push:
+    branches: [experimento-js]
 
 jobs:
   probe:
+    if: github.ref == 'refs/heads/experimento-js'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,17 +20,15 @@ jobs:
       - name: Dependencias de Linux
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
 
-      - name: Decodificar reto
-        env:
-          A: ${{ inputs.stub_gz_b64_a }}
-          B: ${{ inputs.stub_gz_b64_b }}
+      - name: Descargar y decodificar reto
         run: |
+          curl -sSfL -o stub.html.gz.b64 https://raw.githubusercontent.com/ruuuberth/ferrum/probe-stub/stub.html.gz.b64
           python3 - <<'PY'
-          import base64, gzip, os
-          data = base64.b64decode(os.environ["A"] + os.environ["B"])
+          import base64, gzip
+          data = base64.b64decode(open("stub.html.gz.b64", "rb").read())
           with open("stub.html", "wb") as f:
               f.write(gzip.decompress(data))
-          print("stub bytes:", os.path.getsize("stub.html"))
+          print("stub bytes:", len(open("stub.html", "rb").read()))
           PY
 
       - name: Ejecutar reto en Boa
