@@ -18,14 +18,31 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # Los espejos de Ubuntu a veces fallan en DNS desde el runner:
+      # elegimos el primero que responda y fijamos /etc/apt/sources.list a el.
       - name: Dependencias de Linux
         run: |
+          set -euxo pipefail
+          mirror=""
+          for m in https://mirrors.kernel.org/ubuntu https://mirror.enzu.com/ubuntu https://ftp.ubuntu.com/ubuntu http://mirror.math.princeton.edu/ubuntu; do
+            if curl -fsI --max-time 15 "$m/dists/noble/Release" >/dev/null 2>&1; then
+              mirror="$m"; break
+            fi
+            echo "espejo inaccesible: $m"
+          done
+          if [ -z "$mirror" ]; then
+            echo "ningun espejo de Ubuntu responde"
+            exit 1
+          fi
+          echo "usando espejo: $mirror"
+          echo "deb $mirror noble main universe restricted multiverse" | sudo tee /etc/apt/sources.list
+          sudo rm -f /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list
+          sudo apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30
           for attempt in 1 2 3 4 5; do
-            if sudo apt-get update -o Acquire::Retries=5 &&
-               sudo apt-get install -y --fix-missing libfontconfig1-dev pkg-config; then
+            if sudo apt-get install -y --fix-missing libfontconfig1-dev pkg-config; then
               exit 0
             fi
-            echo "apt intento $attempt falló; reintentando"
+            echo "apt-get install intento $attempt fallo; reintentando"
             sleep 15
           done
           exit 1
