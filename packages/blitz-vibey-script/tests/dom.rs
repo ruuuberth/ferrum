@@ -948,3 +948,47 @@ fn file_document_can_load_sibling_file_urls() {
 
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn noscript_content_stays_raw_text_when_scripts_run() {
+    // Regression for pages (e.g. Google) whose `<noscript>` fallback hides the
+    // whole document. In a browser with JavaScript enabled, that fallback never
+    // enters the DOM.
+    let doc = doc_from_html(
+        r#"
+        <html><body>
+            <noscript><style>p{display:none}</style><p>fallback</p></noscript>
+            <p id="target">real content</p>
+        </body></html>
+        "#,
+    );
+
+    let (children, has_fallback_p, has_fallback_style) = {
+        let inner = doc.inner();
+        let noscript_id = inner
+            .query_selector("noscript")
+            .unwrap()
+            .expect("noscript node exists");
+        let noscript = inner.get_node(noscript_id).unwrap();
+        (
+            noscript.children.len(),
+            inner.query_selector("noscript p").unwrap().is_some(),
+            inner.query_selector("noscript style").unwrap().is_some(),
+        )
+    };
+
+    assert_eq!(children, 1, "noscript contents are a single raw text node");
+
+    // The fallback markup is text, not elements: no nested `p`, no `style`
+    // element that could hide the document.
+    assert!(
+        !has_fallback_p,
+        "fallback markup must not be parsed as elements"
+    );
+    assert!(
+        !has_fallback_style,
+        "fallback stylesheet must not be applied"
+    );
+
+    assert_eq!(text_of_selector(&doc, "p#target"), "real content");
+}

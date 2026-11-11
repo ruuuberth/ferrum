@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context as TaskContext, Waker};
 
 use blitz_dom::{BaseDocument, DocGuard, DocGuardMut, Document, DocumentConfig, EventDriver};
-use blitz_html::{DocumentHtmlParser, HtmlProvider};
+use blitz_html::{DocumentHtmlParser, ScriptingHtmlProvider};
 use blitz_traits::events::{DomEvent, UiEvent};
 use url::Url;
 use web_time::Instant;
@@ -53,13 +53,14 @@ impl ScriptDocument {
     /// [`execute_scripts`](Self::execute_scripts) to do so (or rely on the
     /// first `poll` doing it automatically).
     pub fn from_html(html: &str, mut config: DocumentConfig) -> Self {
-        if config.html_parser_provider.is_none() {
-            config.html_parser_provider = Some(Arc::new(HtmlProvider));
-        }
+        // A document destined for script execution is parsed the way a browser
+        // with JavaScript enabled parses it, so `<noscript>` fallbacks stay raw
+        // text instead of entering the DOM.
+        config.html_parser_provider = Some(Arc::new(ScriptingHtmlProvider));
 
         let mut doc = BaseDocument::new(config);
         let mut mutr = doc.mutate();
-        DocumentHtmlParser::parse_into_mutator(&mut mutr, html);
+        DocumentHtmlParser::parse_into_mutator_with_scripting(&mut mutr, html, true);
         drop(mutr);
 
         Self::from_base_document(doc)
@@ -72,8 +73,8 @@ impl ScriptDocument {
     /// document ([`BaseDocument::base_url`]).
     ///
     /// Note: for `innerHTML` support the document must have been created with
-    /// an HTML parser provider (e.g. `blitz_html::HtmlProvider`) set in its
-    /// [`DocumentConfig`].
+    /// an HTML parser provider (e.g. `blitz_html::ScriptingHtmlProvider`) set in
+    /// its [`DocumentConfig`].
     pub fn from_base_document(doc: BaseDocument) -> Self {
         // The default base url (set when `DocumentConfig.base_url` is `None`) is a
         // meaningless data url. Treat it as "no base url".

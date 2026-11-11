@@ -26,6 +26,16 @@ fn html5ever_to_blitz_attr(attr: html5ever::Attribute) -> Attribute {
 #[derive(Copy, Clone, Default, Debug)]
 pub struct HtmlProvider;
 
+/// Like [`HtmlProvider`], but parses documents with the HTML "scripting flag"
+/// enabled — the state a real browser is in when JavaScript is allowed to run.
+///
+/// The only behavioral difference is `<noscript>`: with scripting enabled its
+/// contents are kept as raw text instead of being parsed as markup, so
+/// `<noscript>` fallbacks (styles that hide the page, "enable JavaScript"
+/// notices, meta refreshes, ...) never enter the DOM.
+#[derive(Copy, Clone, Default, Debug)]
+pub struct ScriptingHtmlProvider;
+
 impl HtmlParserProvider for HtmlProvider {
     fn parse_inner_html<'m2, 'doc2>(
         &self,
@@ -33,7 +43,9 @@ impl HtmlParserProvider for HtmlProvider {
         element_id: NodeId,
         html: &str,
     ) {
-        DocumentHtmlParser::parse_inner_html_into_mutator(mutr, element_id, html);
+        DocumentHtmlParser::parse_inner_html_into_mutator_with_scripting(
+            mutr, element_id, html, false,
+        );
     }
 
     fn parse_document(
@@ -42,6 +54,27 @@ impl HtmlParserProvider for HtmlProvider {
         config: blitz_dom::DocumentConfig,
     ) -> Box<dyn blitz_dom::Document> {
         Box::new(crate::HtmlDocument::from_html(html, config))
+    }
+}
+
+impl HtmlParserProvider for ScriptingHtmlProvider {
+    fn parse_inner_html<'m2, 'doc2>(
+        &self,
+        mutr: &'m2 mut DocumentMutator<'doc2>,
+        element_id: NodeId,
+        html: &str,
+    ) {
+        DocumentHtmlParser::parse_inner_html_into_mutator_with_scripting(
+            mutr, element_id, html, true,
+        );
+    }
+
+    fn parse_document(
+        &self,
+        html: &str,
+        config: blitz_dom::DocumentConfig,
+    ) -> Box<dyn blitz_dom::Document> {
+        Box::new(crate::HtmlDocument::from_html_with_scripting(html, config))
     }
 }
 
@@ -89,6 +122,18 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
     }
 
     pub fn parse_into_mutator<'a, 'd>(mutr: &'a mut DocumentMutator<'d>, html: &str) {
+        Self::parse_into_mutator_with_scripting(mutr, html, false);
+    }
+
+    /// Parse as HTML, with the HTML "scripting flag" set to `scripting_enabled`.
+    ///
+    /// Browsers parse documents with the flag on when scripts are allowed to
+    /// run; that makes `<noscript>` contents raw text instead of markup.
+    pub fn parse_into_mutator_with_scripting<'a, 'd>(
+        mutr: &'a mut DocumentMutator<'d>,
+        html: &str,
+        scripting_enabled: bool,
+    ) {
         let is_xhtml_doc = html.starts_with("<?xml")
             || html.starts_with("<!DOCTYPE") && {
                 let first_line = html.lines().next().unwrap();
@@ -106,7 +151,7 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
                 tokenizer: TokenizerOpts::default(),
                 tree_builder: TreeBuilderOpts {
                     exact_errors: false,
-                    scripting_enabled: false, // Enables parsing of <noscript> tags
+                    scripting_enabled,
                     iframe_srcdoc: false,
                     drop_doctype: true,
                     quirks_mode: QuirksMode::NoQuirks,
@@ -140,13 +185,24 @@ impl<'m, 'doc> DocumentHtmlParser<'m, 'doc> {
         element_id: NodeId,
         html: &str,
     ) {
+        Self::parse_inner_html_into_mutator_with_scripting(mutr, element_id, html, false);
+    }
+
+    /// Parse a fragment for `element_id`'s `innerHTML`, with the HTML
+    /// "scripting flag" set to `scripting_enabled`.
+    pub fn parse_inner_html_into_mutator_with_scripting<'a, 'd>(
+        mutr: &'a mut DocumentMutator<'d>,
+        element_id: NodeId,
+        html: &str,
+        scripting_enabled: bool,
+    ) {
         let sink = DocumentHtmlParser::new(mutr);
 
         let opts = ParseOpts {
             tokenizer: TokenizerOpts::default(),
             tree_builder: TreeBuilderOpts {
                 exact_errors: false,
-                scripting_enabled: false, // Enables parsing of <noscript> tags
+                scripting_enabled,
                 iframe_srcdoc: false,
                 drop_doctype: true,
                 quirks_mode: QuirksMode::NoQuirks,
