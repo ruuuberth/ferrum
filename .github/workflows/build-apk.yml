@@ -65,6 +65,16 @@ jobs:
 
       - name: Dependencias de Linux
         run: |
+          set -euo pipefail
+          # Los mirrors por defecto (azure/archive/security.ubuntu.com) a veces
+          # no resuelven desde los runners. Cambiamos solo la URL, dejando las
+          # suites y componentes que ya trae la imagen para no desajustar
+          # versiones con los paquetes preinstalados.
+          for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+            if [ -f "$f" ]; then
+              sudo sed -i -E 's|https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?|https://mirrors.kernel.org/ubuntu|g' "$f"
+            fi
+          done
           for attempt in 1 2 3 4 5; do
             if sudo apt-get update -o Acquire::Retries=5 &&
                sudo apt-get install -y --fix-missing libfontconfig1-dev; then
