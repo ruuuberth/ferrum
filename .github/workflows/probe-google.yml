@@ -62,6 +62,7 @@ jobs:
         run: |
           cargo test -p blitz-traits --test user_agent_identity
           cargo test -p blitz-vibey-script --test dom navigator_
+          rustup component add clippy
           cargo clippy -p blitz-traits --all-targets -- -D warnings
 
       # Flujo completo contra Google real: pedir la busqueda como un navegador,
