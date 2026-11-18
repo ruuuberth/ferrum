@@ -35,6 +35,9 @@ jobs:
           done
           exit 1
 
+      - name: Confiar en el workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Descargar y decodificar reto
         run: |
           git fetch --depth=1 origin probe-stub
