@@ -36,11 +36,14 @@ impl NetProvider for Net {
 #[test]
 fn probe_google_stub() {
     let path = std::env::var("GOOGLE_STUB").unwrap_or_else(|_| "stub.html".to_string());
+    eprintln!("[probe] leyendo {path}");
     let html = std::fs::read_to_string(&path).expect("read challenge HTML");
+    eprintln!("[probe] HTML leido: {} bytes", html.len());
     let nav = Nav::default();
     let net = Net::default();
     let urls = Arc::clone(&nav.urls);
     let cookies = Arc::clone(&net.cookies);
+    eprintln!("[probe] construyendo documento");
     let mut doc = ScriptDocument::from_html(
         &html,
         DocumentConfig {
@@ -51,6 +54,7 @@ fn probe_google_stub() {
         },
     )
     .with_virtual_time();
+    eprintln!("[probe] documento construido");
     eprintln!("[probe] execute_scripts");
     doc.execute_scripts();
     eprintln!("[probe] execute_scripts done");
