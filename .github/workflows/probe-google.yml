@@ -56,3 +56,68 @@ jobs:
           RUST_MIN_STACK: "67108864"
           BLITZ_JS_TRACE: "1"
         run: cargo test -p blitz-vibey-script --test google_stub_probe -- --nocapture
+
+      # Flujo completo contra Google real: pedir la busqueda como un navegador,
+      # resolver el reto con Boa y volver a pedir la URL de navegacion con la
+      # cookie SG_SS. Si Google devuelve resultados, el motor hace su parte.
+      - name: Probar Google en vivo
+        shell: bash
+        env:
+          RUST_MIN_STACK: "67108864"
+        run: |
+          set -euo pipefail
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+          URL="https://www.google.com/search?q=rust+language&hl=es&gl=us"
+
+          curl -sS -L --compressed --max-time 60 -A "$UA" \
+            -c cookies.txt -b cookies.txt -D live-headers.txt "$URL" -o live.html
+          echo "respuesta inicial: $(wc -c < live.html) bytes, HTTP $(head -1 live-headers.txt | tr -d '\r')"
+          grep -o '<title>[^<]*' live.html | head -1 || true
+
+          if grep -Eq "enablejs|knitsail|SG_SS" live.html; then
+            echo "Google devolvio el reto; ejecutandolo en Boa"
+            GOOGLE_STUB="$PWD/live.html" \
+              cargo test -p blitz-vibey-script --test google_stub_probe -- --nocapture \
+              2>&1 | tee probe-live.log
+          else
+            echo "Google devolvio la pagina directamente, sin reto"
+            cp live.html results.html
+            cp live-headers.txt results-headers.txt
+          fi
+
+          if [ -f probe-live.log ]; then
+          python3 - <<'PY'
+          import json, re, sys
+          log = open("probe-live.log", encoding="utf-8", errors="replace").read()
+          nav_match = re.search(r"NAV: (\[.*?\])", log, re.S)
+          cookie_match = re.search(r"COOKIES: (\[.*?\])", log, re.S)
+          errors_match = re.search(r"ERRORS: (\[.*?\])", log, re.S)
+          nav = json.loads(nav_match.group(1)) if nav_match else []
+          cookies = json.loads(cookie_match.group(1)) if cookie_match else []
+          errors = json.loads(errors_match.group(1)) if errors_match else ["sin ERRORS en el log"]
+          if errors:
+              sys.exit(f"errores JS en Google en vivo: {errors}")
+          if not nav:
+              sys.exit("Boa no produjo ninguna navegacion")
+          if not cookies:
+              sys.exit("Boa no produjo la cookie SG_SS")
+          open("nav.txt", "w").write(nav[0])
+          open("sg.txt", "w").write(cookies[0].split(";")[0])
+          print("NAV:", nav[0])
+          print("COOKIE:", cookies[0].split(";")[0][:40], "...")
+          PY
+
+          NAV="$(cat nav.txt)"
+          SG="$(cat sg.txt)"
+          curl -sS -L --compressed --max-time 60 -A "$UA" \
+            -b "$SG" -c cookies.txt -D results-headers.txt "$NAV" -o results.html
+          fi
+
+          echo "resultados: $(wc -c < results.html) bytes, HTTP $(head -1 results-headers.txt | tr -d '\r')"
+          grep -o '<title>[^<]*' results.html | head -1 || true
+          if grep -Eqi "enablejs|knitsail|trafico inusual|unusual traffic|recaptcha" results.html; then
+            echo "Google sigue bloqueando por IP/anti-bot"
+            exit 1
+          fi
+          grep -c 'href="/url?q=\|href="https://' results.html || true
+          echo "Google devolvio resultados"
