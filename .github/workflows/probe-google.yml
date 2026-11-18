@@ -134,3 +134,11 @@ jobs:
           fi
           grep -c 'href="/url?q=\|href="https://' results.html || true
           echo "Google devolvio resultados"
+
+      - name: Subir Cargo.lock resuelto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-lock
+          path: Cargo.lock
+          archive: false
