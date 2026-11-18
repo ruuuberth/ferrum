@@ -93,7 +93,12 @@ impl ScriptRuntime {
         {
             let limits = context.runtime_limits_mut();
             limits.set_stack_size_limit(1024 * 1024);
-            limits.set_recursion_limit(4096);
+            // Boa re-enters the VM natively for accessors and host calls, so
+            // every JS frame can cost real stack. 4096 frames overflowed an
+            // 8 MB thread on Google's live challenge; 1024 leaves headroom
+            // for Android's main thread while still being far above what
+            // normal pages need.
+            limits.set_recursion_limit(1024);
         }
         context.insert_data(ctx.clone());
 
