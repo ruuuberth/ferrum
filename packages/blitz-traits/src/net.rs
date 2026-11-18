@@ -1,8 +1,93 @@
 //! Abstractions of networking so that custom networking implementations can be provided
 
+/// A platform family with one self-consistent browser identity.
+///
+/// The `User-Agent` request header and `navigator.userAgent` come from the same
+/// row, and `navigator.platform` / `navigator.oscpu` are derived from it as
+/// well. Keeping them together matters: a page that sees an Android build
+/// claiming to be desktop `X11; Linux x86_64`, or a Firefox version whose
+/// `rv:` and `Firefox/` tokens disagree, has found a bot signal without any
+/// fingerprinting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetOs {
+    Android,
+    Ios,
+    MacOs,
+    Windows,
+    Linux,
+}
+
+impl TargetOs {
+    /// `User-Agent` string for this platform. Firefox 81 is used everywhere so
+    /// that the claimed feature set stays in step with what the engine can
+    /// actually run; the tokens are the real ones for that release.
+    pub const fn user_agent(self) -> &'static str {
+        match self {
+            // Mobile Firefox omits the `Gecko/20100101` build token.
+            TargetOs::Android => {
+                "Mozilla/5.0 (Android 11; Mobile; rv:81.0) Gecko/81.0 Firefox/81.0"
+            }
+            // Firefox for iOS is a WebKit shell, so it has an Apple UA.
+            TargetOs::Ios => {
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) \
+                 AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/81.0 Mobile/15E148 Safari/605.1.15"
+            }
+            TargetOs::MacOs => {
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:81.0) Gecko/20100101 Firefox/81.0"
+            }
+            TargetOs::Windows => {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:81.0) Gecko/20100101 Firefox/81.0"
+            }
+            TargetOs::Linux => {
+                "Mozilla/5.0 (X11; Linux x86_64; rv:81.0) Gecko/20100101 Firefox/81.0"
+            }
+        }
+    }
+
+    /// `navigator.platform` for this platform.
+    pub const fn platform(self) -> &'static str {
+        match self {
+            // This is what Firefox for Android reports, not "Android".
+            TargetOs::Android => "Linux armv8l",
+            TargetOs::Ios => "iPhone",
+            TargetOs::MacOs => "MacIntel",
+            TargetOs::Windows => "Win32",
+            TargetOs::Linux => "Linux x86_64",
+        }
+    }
+
+    /// `navigator.oscpu` for this platform. Firefox for iOS is WebKit, which
+    /// does not expose the property at all.
+    pub const fn oscpu(self) -> Option<&'static str> {
+        match self {
+            TargetOs::Android => Some("Linux armv8l"),
+            TargetOs::Ios => None,
+            TargetOs::MacOs => Some("Intel Mac OS X 10.15"),
+            TargetOs::Windows => Some("Windows NT 10.0"),
+            TargetOs::Linux => Some("Linux x86_64"),
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+pub const TARGET_OS: TargetOs = TargetOs::Android;
+#[cfg(target_os = "ios")]
+pub const TARGET_OS: TargetOs = TargetOs::Ios;
+#[cfg(target_os = "macos")]
+pub const TARGET_OS: TargetOs = TargetOs::MacOs;
+#[cfg(target_os = "windows")]
+pub const TARGET_OS: TargetOs = TargetOs::Windows;
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "ios",
+    target_os = "macos",
+    target_os = "windows"
+)))]
+pub const TARGET_OS: TargetOs = TargetOs::Linux;
+
 /// The User-Agent Blitz sends with network requests and exposes to JavaScript
 /// as `navigator.userAgent`.
-pub const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0";
+pub const USER_AGENT: &str = TARGET_OS.user_agent();
 
 pub use bytes::Bytes;
 pub use http::{self, HeaderMap, Method};

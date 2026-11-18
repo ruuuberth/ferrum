@@ -1,6 +1,6 @@
 //! Global registration and the ordered JavaScript bootstrap.
 
-use blitz_traits::net::USER_AGENT;
+use blitz_traits::net::{TARGET_OS, USER_AGENT};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::JsArray;
 use boa_engine::property::Attribute;
@@ -89,10 +89,17 @@ pub(super) fn register_globals(ctx: &DomCtx, base_url: Option<&Url>, context: &m
     } else {
         0
     };
-    let navigator = ObjectInitializer::new(context)
+    let mut navigator = ObjectInitializer::new(context);
+    navigator
         .property(
             js_string!("userAgent"),
             JsString::from(USER_AGENT),
+            Attribute::all(),
+        )
+        // Firefox exposes the user agent here without its `Mozilla/` prefix.
+        .property(
+            js_string!("appVersion"),
+            JsString::from(navigator_app_version()),
             Attribute::all(),
         )
         .property(
@@ -114,7 +121,7 @@ pub(super) fn register_globals(ctx: &DomCtx, base_url: Option<&Url>, context: &m
         .property(js_string!("languages"), languages, Attribute::all())
         .property(
             js_string!("platform"),
-            JsString::from(navigator_platform()),
+            JsString::from(TARGET_OS.platform()),
             Attribute::all(),
         )
         .property(js_string!("vendor"), js_string!(""), Attribute::all())
@@ -135,8 +142,12 @@ pub(super) fn register_globals(ctx: &DomCtx, base_url: Option<&Url>, context: &m
             NativeFunction::from_fn_ptr(storage::send_beacon),
             js_string!("sendBeacon"),
             2,
-        )
-        .build();
+        );
+    // Firefox for iOS is a WebKit shell, which has no `navigator.oscpu`.
+    if let Some(oscpu) = TARGET_OS.oscpu() {
+        navigator.property(js_string!("oscpu"), JsString::from(oscpu), Attribute::all());
+    }
+    let navigator = navigator.build();
     register_global(context, "navigator", navigator.into());
 
     // Web Storage, `performance`, `matchMedia`, `screen` and
@@ -274,18 +285,8 @@ fn parse_search_params(_: &JsValue, args: &[JsValue], context: &mut Context) -> 
     Ok(JsArray::from_iter(pairs, context).into())
 }
 
-fn navigator_platform() -> &'static str {
-    if cfg!(target_os = "android") {
-        "Linux armv8l"
-    } else if cfg!(target_os = "ios") {
-        "iPhone"
-    } else if cfg!(target_os = "macos") {
-        "MacIntel"
-    } else if cfg!(target_os = "windows") {
-        "Win32"
-    } else {
-        "Linux x86_64"
-    }
+fn navigator_app_version() -> &'static str {
+    USER_AGENT.strip_prefix("Mozilla/").unwrap_or(USER_AGENT)
 }
 
 fn register_global(context: &mut Context, name: &str, value: JsValue) {

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use blitz_dom::{Document, DocumentConfig};
 use blitz_traits::events::DomEvent;
 use blitz_traits::navigation::{NavigationOptions, NavigationProvider};
-use blitz_traits::net::{NetHandler, NetProvider, Request, Url};
+use blitz_traits::net::{NetHandler, NetProvider, Request, TARGET_OS, Url};
 use blitz_vibey_script::ScriptDocument;
 use keyboard_types::Modifiers;
 
@@ -1126,6 +1126,39 @@ fn navigator_reports_a_real_browser_identity() {
         text_of_selector(&doc, "#out"),
         "true|true|true|false|es-ES|es-ES,es|true"
     );
+}
+
+#[test]
+fn navigator_identity_is_internally_consistent() {
+    // The page must not be able to catch the navigator lying about itself:
+    // appVersion has to be the UA minus `Mozilla/`, the rv:/Firefox/ versions
+    // have to match, and platform/oscpu have to be the ones for this build.
+    let doc = doc_from_html(
+        r#"
+        <html><body><div id="out"></div><script>
+            const ua = navigator.userAgent;
+            document.getElementById("out").textContent = [
+                navigator.appVersion === ua.replace(/^Mozilla\//, ""),
+                ua.includes("Firefox/" + ua.split("rv:")[1].split(")")[0]),
+                navigator.platform,
+                typeof navigator.oscpu,
+                navigator.oscpu == null ? "" : navigator.oscpu,
+            ].join("|");
+        </script></body></html>
+        "#,
+    );
+
+    let expected = format!(
+        "true|true|{}|{}|{}",
+        TARGET_OS.platform(),
+        if TARGET_OS.oscpu().is_some() {
+            "string"
+        } else {
+            "undefined"
+        },
+        TARGET_OS.oscpu().unwrap_or(""),
+    );
+    assert_eq!(text_of_selector(&doc, "#out"), expected);
 }
 
 #[test]

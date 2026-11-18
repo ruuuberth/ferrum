@@ -57,6 +57,13 @@ jobs:
           BLITZ_JS_TRACE: "1"
         run: cargo test -p blitz-vibey-script --test google_stub_probe -- --nocapture
 
+      - name: Identidad coherente (UA vs navigator)
+        shell: bash
+        run: |
+          cargo test -p blitz-traits --test user_agent_identity
+          cargo test -p blitz-vibey-script --test dom navigator_
+          cargo clippy -p blitz-traits --all-targets -- -D warnings
+
       # Flujo completo contra Google real: pedir la busqueda como un navegador,
       # resolver el reto con Boa y volver a pedir la URL de navegacion con la
       # cookie SG_SS. Si Google devuelve resultados, el motor hace su parte.
