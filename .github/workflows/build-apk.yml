@@ -72,7 +72,7 @@ jobs:
           # versiones con los paquetes preinstalados.
           for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
             if [ -f "$f" ]; then
-              sudo sed -i -E 's|https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?|https://mirrors.kernel.org/ubuntu|g' "$f"
+              sudo sed -i -E 's#https?://(azure\.archive|archive|security)\.ubuntu\.com/ubuntu/?#https://mirrors.kernel.org/ubuntu#g' "$f"
             fi
           done
           for attempt in 1 2 3 4 5; do
