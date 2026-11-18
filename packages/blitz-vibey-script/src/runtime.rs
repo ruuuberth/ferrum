@@ -58,6 +58,14 @@ pub(crate) struct ScriptRuntime {
     module_loader: Rc<BlitzModuleLoader>,
 }
 
+/// Run script evaluation on a stack large enough for Boa's recursive parser
+/// and VM. Google's botguard needs more than the ~8 MB that Android gives the
+/// main thread; when at least 16 MB is already available (desktop, tests) we
+/// run in place, otherwise we grow to 32 MB.
+pub(crate) fn with_script_stack<R>(f: impl FnOnce() -> R) -> R {
+    stacker::maybe_grow(16 * 1024 * 1024, 32 * 1024 * 1024, f)
+}
+
 impl ScriptRuntime {
     pub fn new(
         doc: Rc<RefCell<BaseDocument>>,
@@ -152,16 +160,20 @@ impl ScriptRuntime {
     }
 
     fn eval_internal(&mut self, code: &str, description: &str) {
-        if let Err(error) = self.context.eval(Source::from_bytes(code)) {
-            report_js_error(&self.ctx, &mut self.context, description, &error);
-        }
+        with_script_stack(|| {
+            if let Err(error) = self.context.eval(Source::from_bytes(code)) {
+                report_js_error(&self.ctx, &mut self.context, description, &error);
+            }
+        });
     }
 
     /// Run pending promise jobs (microtasks)
     pub fn run_jobs(&mut self, description: &str) {
-        if let Err(error) = self.context.run_jobs() {
-            report_js_error(&self.ctx, &mut self.context, description, &error);
-        }
+        with_script_stack(|| {
+            if let Err(error) = self.context.run_jobs() {
+                report_js_error(&self.ctx, &mut self.context, description, &error);
+            }
+        });
     }
 
     /// Set the value exposed as `document.readyState`

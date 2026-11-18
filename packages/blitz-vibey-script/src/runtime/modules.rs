@@ -10,7 +10,7 @@ use boa_engine::module::{Module, ModuleLoader, ModuleRequest, Referrer};
 use boa_engine::{Context, JsError, JsNativeError, JsResult, Source};
 use url::Url;
 
-use super::{ScriptRuntime, events::report_js_error};
+use super::{ScriptRuntime, events::report_js_error, with_script_stack};
 use crate::fetch::{FetchError, ScriptFetcher, document_may_load};
 
 /// A [`ModuleLoader`] which fetches ES module imports synchronously via the
@@ -96,37 +96,39 @@ impl ScriptRuntime {
     /// loader), then link and evaluate it. Uncaught errors are logged (but not
     /// propagated), matching [`eval`](Self::eval).
     pub fn eval_module(&mut self, code: &str, url: Option<&Url>) {
-        let description = url
-            .map(Url::as_str)
-            .unwrap_or("<inline module>")
-            .to_string();
-        let path = url.map(|url| Path::new(url.as_str()));
-        let source = Source::from_reader(code.as_bytes(), path);
+        with_script_stack(|| {
+            let description = url
+                .map(Url::as_str)
+                .unwrap_or("<inline module>")
+                .to_string();
+            let path = url.map(|url| Path::new(url.as_str()));
+            let source = Source::from_reader(code.as_bytes(), path);
 
-        let module = match Module::parse(source, None, &mut self.context) {
-            Ok(module) => module,
-            Err(error) => {
-                report_js_error(&self.ctx, &mut self.context, &description, &error);
-                return;
+            let module = match Module::parse(source, None, &mut self.context) {
+                Ok(module) => module,
+                Err(error) => {
+                    report_js_error(&self.ctx, &mut self.context, &description, &error);
+                    return;
+                }
+            };
+            // Register the module so that imports resolving to this URL (including
+            // circular ones) reuse it rather than re-fetching
+            if let Some(url) = url
+                && self.module_loader.get(url).is_none()
+            {
+                self.module_loader.insert(url.clone(), module.clone());
             }
-        };
-        // Register the module so that imports resolving to this URL (including
-        // circular ones) reuse it rather than re-fetching
-        if let Some(url) = url
-            && self.module_loader.get(url).is_none()
-        {
-            self.module_loader.insert(url.clone(), module.clone());
-        }
 
-        let promise = module.load_link_evaluate(&mut self.context);
-        self.run_jobs(&description);
-        if let PromiseState::Rejected(reason) = promise.state() {
-            report_js_error(
-                &self.ctx,
-                &mut self.context,
-                &description,
-                &JsError::from_opaque(reason),
-            );
-        }
+            let promise = module.load_link_evaluate(&mut self.context);
+            self.run_jobs(&description);
+            if let PromiseState::Rejected(reason) = promise.state() {
+                report_js_error(
+                    &self.ctx,
+                    &mut self.context,
+                    &description,
+                    &JsError::from_opaque(reason),
+                );
+            }
+        });
     }
 }
